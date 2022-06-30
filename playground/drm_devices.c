@@ -12,27 +12,18 @@ print_error(const char* msg)
 }
 
 static int
-print_udev_device_list(struct udev_list_entry* list)
-{
-  struct udev_list_entry* entry;
-  const char* path;
-
-  int i = 0;
-  udev_list_entry_foreach(entry, list)
-  {
-    path = udev_list_entry_get_name(entry);
-    fprintf(stdout, "[%2d] %s\n", i, path);
-    i++;
-  }
-
-  return 0;
-}
-
-static int
-process_device(struct udev_device* device, int argc, char const* argv[])
+process_device(
+    struct udev_device* device, int argc, char const* argv[], int index)
 {
   int argc_remain = argc;
   char const** argv_remain = argv;
+  const char* syspath;
+
+  syspath = udev_device_get_syspath(device);
+  if (index >= 0)
+    fprintf(stdout, "[%2d] %s\n", index, syspath);
+  else
+    fprintf(stdout, "[xx] %s\n", syspath);
 
   while (argc_remain > 0) {
     int forward = 0;
@@ -92,6 +83,17 @@ process_device(struct udev_device* device, int argc, char const* argv[])
       attr = udev_device_get_sysattr_value(device, key);
       fprintf(stdout, "sysattr \"%s\": %s\n", key, attr);
       forward = 2;
+    } else if (strcmp(argv_remain[0], "--parent-with-subsystem") == 0) {
+      const char* key;
+      struct udev_device* parent;
+      if (argc_remain < 2) return print_error("no subsystem given");
+      key = argv_remain[1];
+      parent = udev_device_get_parent_with_subsystem_devtype(device, key, NULL);
+      if (parent != NULL) {
+        process_device(parent, argc_remain - 2, argv_remain + 2, -1);
+        udev_device_unref(parent);
+      }
+      return 0;
     } else {
       return print_error("invalid device option\n");
     }
@@ -112,8 +114,6 @@ process_device_list(struct udev* udev, struct udev_list_entry* list, int argc,
   char const** argv_remain = argv;
   long n;
   bool has_n = false;
-
-  if (argc_remain == 0) return print_udev_device_list(list);
 
   if (argc_remain > 1 && strcmp(argv_remain[0], "-n") == 0) {
     char* end;
@@ -136,9 +136,7 @@ process_device_list(struct udev* udev, struct udev_list_entry* list, int argc,
     device = udev_device_new_from_syspath(udev, path);
     if (!device) return print_error("failed to get device");
 
-    fprintf(stdout, "[%2d] %s\n", i, path);
-
-    int ret = process_device(device, argc_remain, argv_remain);
+    int ret = process_device(device, argc_remain, argv_remain, i);
 
     if (ret != 0 || has_n) return ret;
   }
